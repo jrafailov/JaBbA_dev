@@ -20,7 +20,6 @@
 #' @importFrom DNAcopy CNA segment smooth.CNA
 #' @importFrom methods as is
 #' @useDynLib JaBbA
-## example change
 ## appease R CMD CHECK misunderstanding of data.table syntax by declaring these global variables
 low.count=high.count=seg=chromosome=alpha_high=alpha_low=beta_high=beta_low=predict.var=dup=psid=.N=es=res=esid=pid=ub=lb=esid=dup=lb=ub=dup=y=dup=pid=lb=es.s.ix=km=es.t.ix=adjusted.ratio=ref.count.t=alt.count.t=depth.normal=depth.tumor=good.reads=zygosity.normal=Bf=ALT=alt.count.n=bad=both.na=chr.a=chr.b=cn=eid=FILTER=force.in=FORMAT=from=from.cn=from.remain=from1=from2=GENO=grl.ix=gstr=i=id=ID=INFO=is.ref=j=label=mean.a=mean.b=mstr=nbins=nothing=oppo=ord=out=QUAL=ra=ra1.ix=ra2.ix=ref.count.n=ref.frac.n=reid=str1=str2=subid=this.cn=to=to.cn=to.remain=to1=to2=type=V1=var=NULL
 
@@ -2218,14 +2217,6 @@ karyograph_stub = function(seg.file, ## path to rds file of initial genome parti
     if (is.character(tryCatch(png(paste(out.file, '.inputdata.png', sep = ''), height = 1000, width = 1000), error = function(e) 'bla'))){
         pdf(paste(out.file, '.inputdata.pdf', sep = ''), height = 10, width = 10)
     }
-    #gTrack(gr.fix(sample(this.cov, pmin(length(this.cov), 5e4)), this.kag$segstats), y.field = field, col = alpha('black', 0.3)) %>% saveRDS("gtrack.test1.rds")
-    #gTrack(this.kag$segstats, y.field = 'mean', angle = 0, border = alpha('black', 0.2)) %>% saveRDS("gtrack.test2.rds")
-    #this.kag$junctions %>% saveRDS('junctions.test2.rds')
-    #plot(gTrack(gr.fix(sample(this.cov, pmin(length(this.cov), 5e4)), this.kag$segstats), y.field = field, col = alpha('black', 0.3)), links = this.kag$junctions, y1 = y1)
-    #dev.off()
-    ##plot(gTrack(this.kag$segstats, y.field = field, col = alpha('black', 0.3)), links = this.kag$junctions, y1 = y1)
-    #pdf(paste(out.file, '.inputdata2.pdf', sep = ''), height = 10, width = 10)
-    #plot(gTrack(this.kag$segstats, y.field = 'mean', angle = 0, border = alpha('black', 0.2)), links = this.kag$junctions, y1 = y1)
     plot(c(gTrack(gr.fix(sample(this.cov, pmin(length(this.cov), 5e4)), this.kag$segstats), y.field = field, col = alpha('black', 0.3)),
             gTrack(this.kag$segstats, y.field = 'mean', angle = 0, col = 'gray10', border = alpha('black', 0.2))), links = this.kag$junctions, y1 = y1)
     dev.off()
