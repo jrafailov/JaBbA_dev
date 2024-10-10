@@ -2212,13 +2212,22 @@ karyograph_stub = function(seg.file, ## path to rds file of initial genome parti
         jmessage('Built gGraph with ', length(this.kag$tile), ' nodes, ', sum(this.kag$adj!=0), ' edges, purity ', round(this.kag$purity,2), ', and ploidy ', round(this.kag$ploidy,2))
     }
 
+    #browser()
     y1 = 10
 
     if (is.character(tryCatch(png(paste(out.file, '.inputdata.png', sep = ''), height = 1000, width = 1000), error = function(e) 'bla'))){
         pdf(paste(out.file, '.inputdata.pdf', sep = ''), height = 10, width = 10)
     }
+    #gTrack(gr.fix(sample(this.cov, pmin(length(this.cov), 5e4)), this.kag$segstats), y.field = field, col = alpha('black', 0.3)) %>% saveRDS("gtrack.test1.rds")
+    #gTrack(this.kag$segstats, y.field = 'mean', angle = 0, border = alpha('black', 0.2)) %>% saveRDS("gtrack.test2.rds")
+    #this.kag$junctions %>% saveRDS('junctions.test2.rds')
+    #plot(gTrack(gr.fix(sample(this.cov, pmin(length(this.cov), 5e4)), this.kag$segstats), y.field = field, col = alpha('black', 0.3)), links = this.kag$junctions, y1 = y1)
+    #dev.off()
+    ##plot(gTrack(this.kag$segstats, y.field = field, col = alpha('black', 0.3)), links = this.kag$junctions, y1 = y1)
+    #pdf(paste(out.file, '.inputdata2.pdf', sep = ''), height = 10, width = 10)
+    #plot(gTrack(this.kag$segstats, y.field = 'mean', angle = 0, border = alpha('black', 0.2)), links = this.kag$junctions, y1 = y1)
     plot(c(gTrack(gr.fix(sample(this.cov, pmin(length(this.cov), 5e4)), this.kag$segstats), y.field = field, col = alpha('black', 0.3)),
-           gTrack(this.kag$segstats, y.field = 'mean', angle = 0, col = 'gray10', border = alpha('black', 0.2))), links = this.kag$junctions, y1 = y1)
+            gTrack(this.kag$segstats, y.field = 'mean', angle = 0, col = 'gray10', border = alpha('black', 0.2))), links = this.kag$junctions, y1 = y1)
     dev.off()
 }
 
