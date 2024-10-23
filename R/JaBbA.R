@@ -2525,7 +2525,8 @@ ramip_stub = function(kag.file,
     if (lp) {
         opt.report = data.table(status = ra.sol$status,
                                 obj = ra.sol$obj,
-                                epgap = ra.sol$epgap)
+                                epgap = ra.sol$epgap,
+                                elapsed.time = ra.sol$elapsed.time)
     } else {
         opt.report =
             do.call(`rbind`,
@@ -3486,7 +3487,8 @@ jbaLP = function(kag.file = NULL,
     new.segstats$cl = 1 ## everything same cluster
     new.segstats$epgap = sol$epgap ## add epgap from genome-side opt
     new.segstats$status = sol$status ## solution status to node metadata
-    new.segstats$obj = bal.gg$meta$obj ## objective
+  	new.segstats$obj = bal.gg$meta$obj ## objective
+  	new.segstats$elapsed.time = sol$elapsed.time
 
     ## weighted adjacency
     adj = sparseMatrix(i = bal.gg$sedgesdt$from, j = bal.gg$sedgesdt$to,
@@ -3512,7 +3514,8 @@ jbaLP = function(kag.file = NULL,
 
     ## add metadata
     out$segstats = new.segstats
-    out$status = sol$status
+  	out$status = sol$status
+  	out$elapsed.time = sol$elapsed.time
     out$epgap = sol$epgap
     out$obj = bal.gg$meta$obj
 
@@ -4263,8 +4266,9 @@ jbaMIP = function(adj, # binary n x n adjacency matrix ($adj output of karyograp
             model$start[varmeta[label = 'beta', id]] = varmeta[label = 'beta', lb]
             model$start[is.infinite(model$start)] = NA;
         }
+        start.time <- Sys.time();
         sol = gurobi::gurobi(model, params = c(list(TimeLimit=tilim), list(...)));
-        sol$xopt = sol$x;
+        sol$xopt = sol$x; end.time <- Sys.time()
     }
     else
     {
@@ -4274,13 +4278,14 @@ jbaMIP = function(adj, # binary n x n adjacency matrix ($adj output of karyograp
 
         if (verbose)
             jmessage('Running CPLEX with relative optimality gap threshold ', epgap)
-
+        
         if (tuning){
             tuning.control = control
             ## add a few more controls to the parameter tuning function
             tuning.control$tuning.display = 2L
             tuning.control$tuning.rep = 3L
             tuning.control$tuning.tilim = 30
+            start.time <- Sys.time();
             sol = Rcplex2(cvec = cvec,
                           Amat = Amat,
                           bvec = consmeta$b,
@@ -4292,8 +4297,9 @@ jbaMIP = function(adj, # binary n x n adjacency matrix ($adj output of karyograp
                           objsense = "min",
                           vtype = varmeta$vtype,
                           control = tuning.control,
-                          tuning = TRUE)
+                          tuning = TRUE); end.time <- Sys.time()
         } else {
+          	start.time <- Sys.time();
             sol = Rcplex2(cvec = cvec,
                           Amat = Amat,
                           bvec = consmeta$b,
@@ -4305,9 +4311,11 @@ jbaMIP = function(adj, # binary n x n adjacency matrix ($adj output of karyograp
                           objsense = "min",
                           vtype = varmeta$vtype,
                           control = control,
-                          tuning = FALSE)
+                          tuning = FALSE); end.time <- Sys.time()
         }
     }
+
+    elapsed.time = as.numeric(end.time - start.time, units = "secs")
 
     if (is.null(sol$xopt))
         sol.l = sol
@@ -9643,11 +9651,11 @@ dflm = function(x, last = FALSE, nm = '')
 #' @param outdir Output directory where to place the summary graphs and txt files (only if multiple JaBbAs are provided.)
 #' @param testMode Whether to run the function in test mode or not. Only used for running unit tests. This mode returns a few specific QC values (as opposed to writing them down in a file) to be checked via test_that.
 
-QCStats = function(inputDT,outdir,testMode=FALSE){
+QCStats = function(inputDT,outdir = NA, testMode=FALSE){
 	library(data.table)
 	library(gGnome)
 	library(ggplot2)
-	
+	library(gUtils)
 	
 	if(testMode){
 			output_gg=readRDS(system.file('extdata', "jabba.gg.rds", package = "JaBbA"))
@@ -9662,87 +9670,139 @@ QCStats = function(inputDT,outdir,testMode=FALSE){
 			return(c(input_segs,output_segs,rmse,fep))
 		}
 	
-	
-	summaryDT=data.table(pair=character(),Tier_1_Input_Junctions=numeric(),Tier_2_Input_Junctions=numeric(),Tier_3_Input_Junctions=numeric(),
-		Tier_1_Output_Junctions=numeric(),Tier_2_Output_Junctions=numeric(),Tier_3_Output_Junctions=numeric(),
-		Number_of_Segments_Input=numeric(),Number_of_Segments_Output=numeric(),Non_telomeric_Loose_Ends=numeric(),
-		Requested_epgap=numeric(),Final_epgap=numeric(),Converged=logical(),Rho_of_Coverage_and_CN=numeric(),p_value_of_Rho=numeric(),
-		r_of_Coverage_and_CN=numeric(),p_value_of_r=numeric(),RMSE_of_Coverage_and_CN=numeric())
-	combforScatter=list(CNMLE=vector(),CN=vector())
+	summaryDT=data.table(
+    pair=character(),
+    Tier_1_Input_Junctions=numeric(),
+    Tier_2_Input_Junctions=numeric(),
+    Tier_3_Input_Junctions=numeric(),
+		Tier_1_Output_Junctions=numeric(),
+    Tier_2_Output_Junctions=numeric(),
+    Tier_3_Output_Junctions=numeric(),
+		Number_of_Segments_Input=numeric(),
+    Number_of_Segments_Output=numeric(),
+    Non_telomeric_Loose_Ends=numeric(),
+    Telomeric_Loose_ends = numeric(),
+    All_Loose_Ends_all_contigs = numeric(),
+		Requested_epgap=numeric(),
+    Final_epgap=numeric(),
+    Converged=logical(),
+    Spearman_Rank_Correlation=numeric(),
+    Spearman_Rank_p_value=numeric(),
+    Pearson_Correlation=numeric(),
+    Pearson_p_value=numeric(),
+    RMSE=numeric(),
+	combforScatter=list(tumor=vector(),CN=vector()))
 
 	for(i in 1:nrow(inputDT)){
-		JaBba_Args=readRDS(paste0(inputDT$inputdir[i],"/cmd.args.rds"))
+    #### READ IN OUTPUTS ###
+
+    JaBba_Args=readRDS(paste0(inputDT$inputdir[i],"/cmd.args.rds"))
 		output_gg=readRDS(paste0(inputDT$inputdir[i], "/jabba.gg.rds"))
 		opt.report=readRDS(paste0(inputDT$inputdir[i], "/opt.report.rds"))
 		kar=readRDS(paste0(inputDT$inputdir[i], "/karyograph.rds"))
-		loose=length(output_gg$nodes$loose$edges.in[output_gg$nodes$loose$edges.in=="()->"])+length(output_gg$nodes$loose$edges.out[output_gg$nodes$loose$edges.out=="->()"])
-		input_Jtiers=table(readRDS(JaBba_Args$junctions)$dt$tier)
+    input_Junctions = read.junctions(JaBba_Args$junctions, geno = TRUE)
+    cov = readRDS(JaBba_Args$coverage)
+    ########################
+
+    n_input_junctions = length(input_Junctions)
+    n_output_junctions = output_gg$edges[type == "ALT"] %>% length
+    input_Jtiers=table(input_Junctions@metadata$tier)
 		output_Jtiers=table(output_gg$edges[type == 'ALT']$dt$tier)
-		input_segs=length(readRDS(JaBba_Args$seg))
-		output_segs=nrow(output_gg$nodes$dt)
-		corr_sp=cor.test(kar$segstats$cnmle[!is.na(kar$segstats$cn)],kar$segstats$cn[!is.na(kar$segstats$cn)],method="spearman")	
-		corr_pe=cor.test(kar$segstats$cnmle[!is.na(kar$segstats$cn)],kar$segstats$cn[!is.na(kar$segstats$cn)],method="pearson")
-		rmse=sqrt(sum((kar$segstats$cnmle-kar$segstats$cn)^2,na.rm=TRUE))
-		fep=readRDS(paste0(inputDT$inputdir[i],"/jabba.raw.rds"))$epgap
 
-				
+    loose.gr = output_gg$nodes$loose
+    GenomeInfoDb::seqlevelsStyle(loose.gr) = "NCBI"
+    loose.gr = loose.gr %Q% (seqnames %in% c(1:22, "X", "Y"))
+    
+    loose= loose.gr %Q% (terminal == F) %>% length
+    telomeric_loose = loose.gr %Q% (terminal == T) %>% length
+    all_loose = loose.gr %>% length
+
+    cov.tile <- gr.tile(cov, 1e5) %>%
+      gr.val(cov, JaBba_Args$field) %>%
+      gr.val(kar$segstats, "cn")
+    mcols(cov.tile)$tumor <- mcols(cov.tile)[, JaBba_Args$field]
+    mcols(cov.tile)[, JaBba_Args$field] <- NULL
+
+		############ COMPUTED VALUES BASED ON JABBA #############
+    total.cn.gr <- output_gg$nodes$gr; GenomeInfoDb::seqlevelsStyle(total.cn.gr) = "NCBI"; total.cn.gr = total.cn.gr %Q% (seqnames %in% c(1:22, "X", "Y"))
+		input_segs=readRDS(JaBba_Args$seg); GenomeInfoDb::seqlevelsStyle(input_segs) = "NCBI"; input_segs = input_segs %Q% (seqnames %in% c(1:22, "X", "Y")) %>% length
+		output_segs=length(total.cn.gr)
+		corr_sp= cor.test(cov.tile$tumor, cov.tile$cn, method="spearman")	
+		corr_pe= cor.test(cov.tile$tumor, cov.tile$cn, method = "pearson")
+
+		rmse= sqrt(mean(((cov.tile$tumor - cov.tile$cn)^2), na.rm = T))
+    fep=opt.report$epgap
+
+		###### WRITE TO FILE ######
 		sink(paste0(inputDT$inputdir[i],"/QCStats.txt"))
-		cat("Stat \t Value \n")
-		cat(paste0("Tier_1_Input_Junctions \t",ifelse("1" %in% names(input_Jtiers), input_Jtiers[[1]], "0"),"\n"))
-		cat(paste0("Tier_2_Input_Junctions \t",ifelse("2" %in% names(input_Jtiers), input_Jtiers[[2]], "0"),"\n"))
-		cat(paste0("Tier_3_Input_Junctions \t",ifelse("3" %in% names(input_Jtiers), input_Jtiers[[3]], "0"),"\n"))
-		cat(paste0("Tier_1_Output_Junctions \t",ifelse("1" %in% names(output_Jtiers), output_Jtiers[[1]], "0"),"\n"))
-		cat(paste0("Tier_2_Output_Junctions \t",ifelse("2" %in% names(output_Jtiers), output_Jtiers[[2]], "0"),"\n"))
-		cat(paste0("Tier_3_Output_Junctions \t",ifelse("3" %in% names(output_Jtiers), output_Jtiers[[3]], "0"),"\n"))
+		cat("Statistic\t Value \n")
+    cat(paste0("Input_Junctions\t", n_input_junctions, "\n"))
+    cat(paste0("Output_Junctions\t", n_output_junctions, "\n")) 
 
-		cat(paste0("Number_of_Segments_Input \t",input_segs,"\n"))
-		cat(paste0("Number_of_Segments_Output \t",output_segs,"\n"))
-		cat(paste0("Non_telomeric_Loose_Ends \t",loose,"\n"))
+		cat(paste0("Tier_1_Input_Junctions\t",ifelse("1" %in% names(input_Jtiers), input_Jtiers["1"], "0"),"\n"))
+		cat(paste0("Tier_2_Input_Junctions\t",ifelse("2" %in% names(input_Jtiers), input_Jtiers["2"], "0"),"\n"))
+		cat(paste0("Tier_3_Input_Junctions\t",ifelse("3" %in% names(input_Jtiers), input_Jtiers["3"], "0"),"\n"))
+		cat(paste0("Tier_1_Output_Junctions\t",ifelse("1" %in% names(output_Jtiers), output_Jtiers["1"], "0"),"\n"))
+		cat(paste0("Tier_2_Output_Junctions\t",ifelse("2" %in% names(output_Jtiers), output_Jtiers["2"], "0"),"\n"))
+		cat(paste0("Tier_3_Output_Junctions\t",ifelse("3" %in% names(output_Jtiers), output_Jtiers["3"], "0"),"\n"))
+    cat(paste0("Non_telomeric_Loose_Ends\t",loose,"\n"))
 
-		cat(paste0("Requested_epgap \t",JaBba_Args$epgap,"\n"))
-		cat(paste0("Final_epgap \t",fep,"\n"))
-		cat(paste0("Converged \t",ifelse(JaBba_Args$epgap>fep,"TRUE","FALSE"),"\n"))
 
-		cat(paste0("Rho_of_Coverage_and_CN \t",signif(as.vector(corr_sp$estimate),digits=4),"\n"))
-		cat(paste0("p_value_of_Rho \t",signif(as.vector(corr_sp$p.value),digits=4),"\n"))
+		cat(paste0("Number_of_Segments_Input\t",input_segs,"\n"))
+		cat(paste0("Number_of_Segments_Output\t",output_segs,"\n"))
+		cat(paste0("Non_telomeric_Loose_Ends\t",loose,"\n"))
+    cat(paste0("Telomeric_Loose_Ends\t", telomeric_loose, "\n"))
+    cat(paste0("All_Loose_Ends_all_contigs\t", all_loose, "\n"))
 
-		cat(paste0("r_of_Coverage_and_CN \t",signif(as.vector(corr_pe$estimate),digits=4),"\n"))
-		cat(paste0("p_value_of_r \t",signif(as.vector(corr_pe$p.value),digits=4),"\n"))
+		cat(paste0("Requested_epgap\t",JaBba_Args$epgap,"\n"))
+		cat(paste0("Final_epgap\t",fep,"\n"))
+		cat(paste0("Converged\t",ifelse(JaBba_Args$epgap>fep,"TRUE","FALSE"),"\n"))
 
-		cat(paste0("RMSE_of_Coverage_and_CN \t",signif(rmse,digits=4),"\n"))
+		cat(paste0("Spearman_Rank_Correlation\t",signif(as.vector(corr_sp$estimate),digits=8),"\n"))
+		cat(paste0("Spearman_Rank_p_value\t",signif(as.vector(corr_sp$p.value),digits=8),"\n"))
+
+		cat(paste0("Pearson_Correlation\t",signif(as.vector(corr_pe$estimate),digits=8),"\n"))
+		cat(paste0("Pearson_p_value\t",signif(as.vector(corr_pe$p.value),digits=8),"\n"))
+
+		cat(paste0("RMSE \t",signif(rmse,digits=8),"\n"))
 		sink()
 
-		QCGraphs(StatsTxt=paste0(inputDT$inputdir[i],"/QCStats.txt"),KarDT=data.table(cn=kar$segstats$cn,cnmle=kar$segstats$cnmle),
-			outdir=inputDT$inputdir[i])
+    QCGraphs(StatsTxt=paste0(inputDT$inputdir[i],"/QCStats.txt"),
+             corDT=data.table(cn=cov.tile$cn,tumor=cov.tile$tumor),
+             outdir= inputDT$inputdir[i])
 
 		if(nrow(inputDT)>1){
 				summaryDT=rbind(summaryDT,data.table(pair=inputDT$pair[i],
-					Tier_1_Input_Junctions=as.numeric(ifelse("1" %in% names(input_Jtiers), input_Jtiers[[1]], "0")),
-					Tier_2_Input_Junctions=as.numeric(ifelse("2" %in% names(input_Jtiers), input_Jtiers[[2]], "0")),
-					Tier_3_Input_Junctions=as.numeric(ifelse("3" %in% names(input_Jtiers), input_Jtiers[[2]], "0")),
-					Tier_1_Output_Junctions=as.numeric(ifelse("1" %in% names(output_Jtiers), output_Jtiers[[1]], "0")),
-					Tier_2_Output_Junctions=as.numeric(ifelse("3" %in% names(output_Jtiers), output_Jtiers[[1]], "0")),
-					Tier_3_Output_Junctions=as.numeric(ifelse("3" %in% names(output_Jtiers), output_Jtiers[[1]], "0")),
-					Number_of_Segments_Input=input_segs,Number_of_Segments_Output=output_segs,
+					Tier_1_Input_Junctions=as.numeric(ifelse("1" %in% names(input_Jtiers), input_Jtiers["1"], "0")),
+					Tier_2_Input_Junctions=as.numeric(ifelse("2" %in% names(input_Jtiers), input_Jtiers["2"], "0")),
+					Tier_3_Input_Junctions=as.numeric(ifelse("3" %in% names(input_Jtiers), input_Jtiers["3"], "0")),
+					Tier_1_Output_Junctions=as.numeric(ifelse("1" %in% names(output_Jtiers), output_Jtiers["1"], "0")),
+					Tier_2_Output_Junctions=as.numeric(ifelse("3" %in% names(output_Jtiers), output_Jtiers["2"], "0")),
+					Tier_3_Output_Junctions=as.numeric(ifelse("3" %in% names(output_Jtiers), output_Jtiers["3"], "0")),
+					Number_of_Segments_Input=input_segs,
+          Number_of_Segments_Output=output_segs,
 					Non_telomeric_Loose_Ends=loose,
-					Requested_epgap=JaBba_Args$epgap,Final_epgap=fep,Converged=ifelse(JaBba_Args$epgap>fep,"TRUE","FALSE"),
-					Rho_of_Coverage_and_CN=signif(as.vector(corr_sp$estimate),digits=4),
-					p_value_of_Rho=signif(as.vector(corr_sp$p.value),digits=4),
-					r_of_Coverage_and_CN=signif(as.vector(corr_pe$estimate),digits=4),
-					p_value_of_r=signif(as.vector(corr_pe$p.value),digits=4),
-					RMSE_of_Coverage_and_CN=signif(rmse,digits=4)))
+          Telomeric_Loose_Ends = telomeric_loose,
+          All_Loose_Ends_all_contigs = all_loose,
+					Requested_epgap=JaBba_Args$epgap,
+          Final_epgap=fep,Converged=ifelse(JaBba_Args$epgap>fep,"TRUE","FALSE"),
+					Spearman_Rank_Correlation=signif(as.vector(corr_sp$estimate),digits=8),
+          Spearman_Rank_p_value=signif(as.vector(corr_sp$estimate),digits=8),
+          Pearson_Correlation=signif(as.vector(corr_pe$estimate),digits=8),
+          Pearson_p_value=signif(as.vector(corr_pe$estimate),digits=8),
+          RMSE=signif(rmse,digits=4)))
 
-				combforScatter$CNMLE=c(combforScatter$CNMLE,kar$segstats$cnmle)
-				combforScatter$CN=c(combforScatter$CN,kar$segstats$cn)
+				combforScatter$tumor=c(combforScatter$tumor,cov.tile$tumor)
+				combforScatter$CN=c(combforScatter$CN,cov.tile$cn)
 			
 		}
 	}
 
 	if(nrow(inputDT)>1){
 
-		Comb_corr_sp=cor.test(combforScatter$CNMLE,combforScatter$CN,method="spearman")	
-		Comb_corr_pe=cor.test(combforScatter$CNMLE,combforScatter$CN,method="pearson")
-		Comb_rmse=sqrt(sum((combforScatter$CNMLE-combforScatter$CN)^2,na.rm=TRUE))
+		Comb_corr_sp=cor.test(combforScatter$tumor,combforScatter$CN,method="spearman")	
+		Comb_corr_pe=cor.test(combforScatter$tumor,combforScatter$CN,method="pearson")
+		Comb_rmse= sqrt(mean(((combforScatter$tumor - combforScatter$CN)^2), na.rm = T))
 
 		summaryDT=rbind(summaryDT,data.table(pair="Mean",
 					Tier_1_Input_Junctions=mean(summaryDT$Tier_1_Input_Junctions),
@@ -9763,7 +9823,7 @@ QCStats = function(inputDT,outdir,testMode=FALSE){
 					RMSE_of_Coverage_and_CN=signif(Comb_rmse,digits=4)))
 		
 		fwrite(summaryDT,paste0(outdir,"/QCSummary.csv"))
-		QCGraphs(StatsCsv=paste0(outdir,"/QCSummary.csv"),KarDT=data.table(cn=combforScatter$CN,cnmle=combforScatter$CNMLE),
+		QCGraphs(StatsCsv=paste0(outdir,"/QCSummary.csv"),KarDT=data.table(cn=combforScatter$CN,cnmle=combforScatter$tumor),
 			outdir=outdir)
 	}
 }
@@ -9777,9 +9837,9 @@ QCStats = function(inputDT,outdir,testMode=FALSE){
 #' @param StatsCsv Csv with pairs (column 1) and corresponding path to QCStats file (columns 2). Only provide if running for more than 1 file.
 #' @param KarDT Datatable with paired up values of cn and cnmle from the output karyograph.
 #' @param outdir Output directory where to place the function's graphs and txt files
+QCGraphs=function(StatsTxt=NA, StatsCsv=NA, corDT, outdir){
 
-QCGraphs=function(StatsTxt=NA, StatsCsv=NA, KarDT, outdir){
-	if(!is.na(StatsTxt)){
+  if(!is.na(StatsTxt)){
 		QCDF=read.table(StatsTxt,header=TRUE,stringsAsFactors=FALSE)
 		QCList=list()
 		for(i in 1:nrow(QCDF)){
@@ -9787,47 +9847,63 @@ QCGraphs=function(StatsTxt=NA, StatsCsv=NA, KarDT, outdir){
 		}
 	}
 
-	if(!is.na(StatsCsv)){
+  if(!is.na(StatsCsv)){
 		QCDF=read.csv(StatsCsv,header=TRUE,stringsAsFactors=FALSE)
 		QCList=QCDF[QCDF$pair=="Mean",]
 	}
 
-	signifr=ifelse(QCList$"p_value_of_r"<0.01,"Significant","Non-Significant")
-	signifRho=ifelse(QCList$"p_value_of_Rho"<0.01,"Significant","Non-Significant")
-	convergence=ifelse(QCList$"Converged","reached","not reached")
-	subtext=paste0("Convergence ",convergence, " (epgap delta=",signif(as.numeric(QCList$Requested_epgap)-as.numeric(QCList$Final_epgap),digits=4),")")
-	captiontext=paste0("rho=",QCList$"Rho_of_Coverage_and_CN","(",signifRho,");"," r=",QCList$"r_of_Coverage_and_CN","(",signifr,")")
+  signifr=ifelse(QCList$"Pearson_p_value" %>% as.numeric() <0.01,"Significant","Non-Significant")
+	signifRho=ifelse(QCList$"Spearman_Rank_p_value" %>% as.numeric() <0.01,"Significant","Non-Significant")
 
-	png(paste0(outdir,"/QC_CNScatter.png"))
-	p=ggplot(data.frame(KarDT), aes(x=cn, y=cnmle)) + geom_point()+
-	labs(title = "CN vs CN_Old",subtitle = subtext,
-		caption=captiontext)+xlab("CN")+ylab("CN_Old")+
-	theme_grey(base_size = 16)
+  convergence=ifelse(QCList$"Converged","reached","not reached")
+	subtext=paste0("Convergence ",convergence, " (epgap delta=",signif(as.numeric(QCList$Requested_epgap)-as.numeric(QCList$Final_epgap),digits=4),")")
+	captiontext=paste0("Rank coefficient=",QCList$"Spearman_Rank_Correlation" %>% as.numeric(),"(",signifRho,");"," Pearson r=",QCList$"Pearson_Correlation","(",signifr,")")
+
+  png(paste0(outdir,"/QC_CNScatter.png"))
+	p = ggplot(data.frame(corDT), aes(x= cn + 1, y= tumor + 1)) +
+    #geom_point()+
+    geom_jitter(size = 0.0001) +
+    geom_boxplot(aes(group = cn), outlier.shape = NA, color = 'red') +    
+    labs(title = "CN vs. JaBbA Input",subtitle = subtext,
+         caption=captiontext)+xlab("log(CN + 1)")+ylab("log(JaBbA Input + 1)")+
+    theme_grey(base_size = 16) +
+    scale_y_continuous(transform = "log10") +
+    scale_x_continuous(transform = "log10")
 	print(p)
 	dev.off()
 
-	Frequency=c(as.integer(as.numeric(QCList$"Number_of_Segments_Input")),as.integer(as.numeric(QCList$"Number_of_Segments_Output")))
+  Frequency=c(as.integer(as.numeric(QCList$"Number_of_Segments_Input")),as.integer(as.numeric(QCList$"Number_of_Segments_Output")))
 	Type=c("Input","Output")
 	data<- data.frame(Frequency, Type)
 
-	png(paste0(outdir,"/QC_SegmentsBarplot.png"))
-	p=ggplot(data, aes(x=Type, y=Frequency, fill=Type)) + geom_bar(stat="identity", color="black",width=0.6)+
-	scale_fill_manual(values=c("#56B4E9", "#E69F00"))+
-	labs(title = "Genomic Segments")+ylab("Abundance")+theme_grey(base_size = 20)+geom_text(aes(label=Frequency), vjust=1.6, color="black", size=10)
+  png(paste0(outdir,"/QC_SegmentsBarplot.png"))
+	p = ggplot(data, aes(x=Type, y=Frequency, fill=Type)) +
+    geom_bar(stat="identity", color="black",width=0.6) +
+    scale_fill_manual(values=c("#56B4E9", "#E69F00")) +
+    labs(title = "Genomic Segments") +
+    ylab("Abundance") +
+    theme_grey(base_size = 20) +
+    geom_text(aes(label=Frequency), vjust=1.6, color="black", size=10)
 	print(p)
 	dev.off()
 
-
-	Frequency=c(as.numeric(QCList$Tier_1_Input_Junctions),as.numeric(QCList$Tier_2_Input_Junctions),as.numeric(QCList$Tier_3_Input_Junctions)
-		,as.numeric(QCList$Tier_1_Output_Junctions),as.numeric(QCList$Tier_2_Output_Junctions),as.numeric(QCList$Tier_3_Output_Junctions))
+  Frequency=c(as.numeric(QCList$Tier_1_Input_Junctions),as.numeric(QCList$Tier_2_Input_Junctions),as.numeric(QCList$Tier_3_Input_Junctions)
+             ,as.numeric(QCList$Tier_1_Output_Junctions),as.numeric(QCList$Tier_2_Output_Junctions),as.numeric(QCList$Tier_3_Output_Junctions))
 	Type=c("Input","Input","Input","Output","Output","Output")
 	Tier=c(1,2,3,1,2,3)
 	data<- data.frame(Frequency, Type, Tier)
 
-	png(paste0(outdir,"/QC_JunctionsBarplot.png"))
-	p=ggplot(data=data, aes(x=Tier, y=Frequency, fill=Type)) +
-	geom_bar(stat="identity", color="black", position=position_dodge())+theme_minimal()+labs(title = "Junction Tiers",subtitle=paste0("Number of non-telomeric loose ends=",QCList$"Non_telomeric_Loose_Ends"))+theme_grey(base_size = 16)
+  png(paste0(outdir,"/QC_JunctionsBarplot.png"))
+	p = ggplot(data=data, aes(x=Tier, y=Frequency, fill=Type)) +
+    geom_bar(stat="identity", color="black", position=position_dodge())+
+    theme_minimal()+
+    labs(title = "Junction Tiers",
+         subtitle=paste0("Number of non-telomeric loose ends=",
+                         QCList$"Non_telomeric_Loose_Ends"))+
+    theme_grey(base_size = 16)
 	print(p)
 	dev.off()
+
 }
-                  
+
+
